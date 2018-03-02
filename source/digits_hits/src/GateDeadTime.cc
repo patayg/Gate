@@ -20,6 +20,8 @@ See LICENSE.md for further details
 #include "GateVVolume.hh"
 #include "GateMaps.hh"
 
+//const int MAGIC_FOV_SIZE = 47;
+const int MAGIC_FOV_SIZE = 56;
 
 GateDeadTime::GateDeadTime(GatePulseProcessorChain* itsChain,
 			   const G4String& itsName)
@@ -34,8 +36,21 @@ GateDeadTime::GateDeadTime(GatePulseProcessorChain* itsChain,
   m_messenger = new GateDeadTimeMessenger(this);
 }
 
+// XXXX FIXME XXXX
+void fill_deadTimeTable(int detID, unsigned long long int *deadTimeTable, double value) {
+// detID = headID*47 + sliceID
+	const int NZONES = MAGIC_FOV_SIZE;
+    int head_id = detID / NZONES;
+    int triggerzone_id = detID % MAGIC_FOV_SIZE;
 
-
+    int dead_zone_min = std::max(0, 10*((triggerzone_id-21)/10)-5); // magic
+    int dead_zone_max = std::min(NZONES-1, 10*((triggerzone_id+4)/10)+29); // magic
+    for (int i=dead_zone_min; i<=dead_zone_max; i++) {
+        int id = head_id*MAGIC_FOV_SIZE + i;
+	    deadTimeTable[id] = value;
+    }
+}
+// XXXX FIXME XXXX
 
 GateDeadTime::~GateDeadTime()
 {
@@ -108,16 +123,18 @@ for(G4int i = 1 ; i < numberOfHigherLevels + 1; i++)
 
     }
 */
-    G4int multFactor = 1;
-     for(G4int i = 1 ; i < numberOfHigherLevels + 1; i++)
-    {
-          multFactor *= numberOfComponentForLevel[i-1];
-          m_generalDetId += aVolumeID->GetCopyNo(m_depth-i)*multFactor;
+//    G4int multFactor = 1;
+//     for(G4int i = 1 ; i < numberOfHigherLevels + 1; i++)
+//    {
+//          multFactor *= numberOfComponentForLevel[i-1];
+//          m_generalDetId += aVolumeID->GetCopyNo(m_depth-i)*multFactor;
+//
+//  //G4cout<<"numberOfComponentForLevel["<<i-1<<"] = "<<numberOfComponentForLevel[i-1]<< Gateendl;
+//  //G4cout<<"GetCopyNo(m_depth-i) = "<<aVolumeID->GetCopyNo(m_depth-i)<< Gateendl;
+//  //G4cout<<"multFactor"<<multFactor<< Gateendl;
+//    }
+     m_generalDetId = inputPulse->GetComponentID(1)*MAGIC_FOV_SIZE + inputPulse->GetComponentID(2); // XXXX FIXME XXXX
 
-  //G4cout<<"numberOfComponentForLevel["<<i-1<<"] = "<<numberOfComponentForLevel[i-1]<< Gateendl;
-  //G4cout<<"GetCopyNo(m_depth-i) = "<<aVolumeID->GetCopyNo(m_depth-i)<< Gateendl;
-  //G4cout<<"multFactor"<<multFactor<< Gateendl;
-    }
 //////////////////////////////////////////////////////////////
   // FIND TIME OF PULSE
   unsigned long long int currentTime = (unsigned long long int)((inputPulse->GetTime())/picosecond);
@@ -141,12 +158,13 @@ for(G4int i = 1 ; i < numberOfHigherLevels + 1; i++)
 //      m_deadTimeTable[m_generalDetId] = currentTime + m_deadTime;
       if (m_bufferSize>1){
       	m_bufferCurrentSize[m_generalDetId]++;
-	if (m_bufferCurrentSize[m_generalDetId]==m_bufferSize){
-	    m_deadTimeTable[m_generalDetId] = currentTime + m_deadTime;
-	    m_bufferCurrentSize[m_generalDetId]=0;
-	}
-      } else {
-      	m_deadTimeTable[m_generalDetId] = currentTime + m_deadTime;
+      	if (m_bufferCurrentSize[m_generalDetId]==m_bufferSize){
+      		m_deadTimeTable[m_generalDetId] = currentTime + m_deadTime;
+      		m_bufferCurrentSize[m_generalDetId]=0;
+      	}
+      } else { // m_bufferSize<=1
+    	  fill_deadTimeTable(m_generalDetId, m_deadTimeTable, currentTime + m_deadTime);// XXXX FIXME XXXX
+//      	m_deadTimeTable[m_generalDetId] = currentTime + m_deadTime;
       }
       if (nVerboseLevel>5){
 	  G4cout << "We have accept " << currentTime << " a pulse in element " << m_generalDetId <<
@@ -162,14 +180,15 @@ for(G4int i = 1 ; i < numberOfHigherLevels + 1; i++)
 	G4cout << "Removed pulse, due to dead time:\n";
       // AND IF "PARALYSABLE" DEAD TIME, MAKE THE DEATH OF DETECTOR LONGER
       if ((m_bufferSize>1) && (m_bufferMode==1)){
-	if (m_bufferCurrentSize[m_generalDetId]<m_bufferSize-1) {
+    	  if (m_bufferCurrentSize[m_generalDetId]<m_bufferSize-1) {
       	    m_bufferCurrentSize[m_generalDetId]++;
       	    outputPulseList.push_back(new GatePulse(*inputPulse));
-	}
+    	  }
       } else {
       	if(m_isParalysable && (m_bufferSize<2)){
-	    m_deadTimeTable[m_generalDetId]  = currentTime + m_deadTime;
-	}
+      		fill_deadTimeTable(m_generalDetId, m_deadTimeTable, currentTime + m_deadTime);// XXXX FIXME XXXX
+//      		m_deadTimeTable[m_generalDetId]  = currentTime + m_deadTime;
+      	}
       }
     }
   if (nVerboseLevel>99)
@@ -267,6 +286,7 @@ void GateDeadTime::FindLevelsParams(GateObjectStore*  anInserterStore)
 
   // create the table of "rebirth time" (detector is dead than it rebirth)
   //unsigned long long int* m_deadTimeTable = new unsigned long long int[numberTotalOfComponentInSystem];
+  numberTotalOfComponentInSystem = 24*MAGIC_FOV_SIZE; // XXXX FIXME XXXX
   m_deadTimeTable = (unsigned long long int*)malloc(sizeof(unsigned long long int)*numberTotalOfComponentInSystem);
   m_bufferCurrentSize = (G4double*)malloc(sizeof(G4double)*numberTotalOfComponentInSystem);
 
@@ -293,3 +313,4 @@ void GateDeadTime::DescribeMyself(size_t indent)
 {
   G4cout << GateTools::Indent(indent) << "DeadTime: " << G4BestUnit(m_deadTime,"Time") << Gateendl;
 }
+
